@@ -1,14 +1,18 @@
 package main
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -17,6 +21,7 @@ import (
 
 var (
 	cacheFile string
+	cache     map[string]string
 	items     []list.Item
 	docStyle  = lipgloss.NewStyle().Margin(1, 2)
 )
@@ -37,12 +42,47 @@ func (i item) CurrentVersion() string { return i.installed }
 func (i item) DownloadURL() string    { return i.url }
 func (i item) FilterValue() string    { return i.name }
 
+type listKeyMap struct {
+	installFont   key.Binding
+	uninstallFont key.Binding
+}
+
+func newListKeyMap() *listKeyMap {
+	return &listKeyMap{
+		installFont: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "install the newest version"),
+		),
+		uninstallFont: key.NewBinding(
+			key.WithKeys("r"),
+			key.WithHelp("r", "uninstall the chosen font"),
+		),
+	}
+}
+
 type model struct {
 	list list.Model
+	keys *listKeyMap
+}
+
+func newModel() model {
+	listKeys := newListKeyMap()
+	fonts := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	fonts.Title = "GGNF"
+	fonts.AdditionalFullHelpKeys = func() []key.Binding {
+		return []key.Binding{
+			listKeys.installFont,
+			listKeys.uninstallFont,
+		}
+	}
+	return model{
+		list: fonts,
+		keys: listKeys,
+	}
 }
 
 func (m model) Init() tea.Cmd {
-	return nil
+	return tea.EnterAltScreen
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -50,6 +90,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
+		}
+
+		// Don't match any of the keys below if we're actively filtering.
+		if m.list.FilterState() == list.Filtering {
+			break
+		}
+
+		switch {
+		case key.Matches(msg, m.keys.installFont):
+			// Download font
+			font, _ := m.list.SelectedItem().(item)
+			statusMsg := "Download " + font.name
+			if err := downloadFont(font); err != nil {
+				statusMsg += (" failed due to: " + err.Error())
+			}
+
+			return m, tea.Batch(m.list.NewStatusMessage(statusMsg))
+		case key.Matches(msg, m.keys.uninstallFont):
 		}
 	case tea.WindowSizeMsg:
 		h, v := docStyle.GetFrameSize()
@@ -80,12 +138,7 @@ func main() {
 		panic(err)
 	}
 
-	m := model{list: list.New(items, list.NewDefaultDelegate(), 0, 0)}
-	m.list.Title = "GGNF"
-
-	p := tea.NewProgram(m, tea.WithAltScreen())
-
-	if _, err := p.Run(); err != nil {
+	if _, err := tea.NewProgram(newModel()).Run(); err != nil {
 		fmt.Println("Error running program:", err)
 		os.Exit(1)
 	}
@@ -102,7 +155,7 @@ func createCacheFile() error {
 	if _, err := os.Stat(cacheFile); err != nil {
 		if os.IsNotExist(err) {
 			os.Create(cacheFile)
-			return setCache(map[string]string{})
+			return setCache()
 		}
 		return err
 	}
@@ -111,20 +164,18 @@ func createCacheFile() error {
 }
 
 // getCache loads cache data from cache file
-func getCache() (map[string]string, error) {
-	var installed map[string]string
+func getCache() error {
 	raw, err := ioutil.ReadFile(cacheFile)
 	if err != nil {
-		return installed, nil
+		return nil
 	}
 
-	err = json.Unmarshal(raw, &installed)
-	return installed, err
+	return json.Unmarshal(raw, &cache)
 }
 
 // setCache saves the input to cache file
-func setCache(installed map[string]string) error {
-	raw, err := json.Marshal(installed)
+func setCache() error {
+	raw, err := json.Marshal(cache)
 	if err != nil {
 		return err
 	}
@@ -135,8 +186,7 @@ func setCache(installed map[string]string) error {
 // getLatestRelease fetches Github for the latest Nerd Fonts release
 func getLatestRelease(ctx context.Context) error {
 	// Load installed fonts
-	installed, err := getCache()
-	if err != nil {
+	if err := getCache(); err != nil {
 		return err
 	}
 
@@ -155,11 +205,83 @@ func getLatestRelease(ctx context.Context) error {
 			installed: "None",
 		}
 
-		if v, ok := installed[i.name]; ok {
+		if v, ok := cache[i.name]; ok {
 			i.installed = v
 		}
 
 		items = append(items, i)
+	}
+	return nil
+}
+
+func downloadFont(font item) error {
+	tmpPath := filepath.Join(os.TempDir(), font.name+".zip")
+	tmp, err := os.Create(tmpPath)
+	if err != nil {
+		return err
+	}
+	defer tmp.Close()
+	// Download to tmp file
+	resp, err := http.Get(font.url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	// Copy to tmp file
+	_, err = io.Copy(tmp, resp.Body)
+	if err != nil {
+		return err
+	}
+
+	var fontDir string
+	if os.Getuid() == 0 {
+		fontDir = systemFontDir()
+	} else {
+		fontDir = userFontDir()
+	}
+
+	return unzip(tmpPath, filepath.Join(fontDir, font.name))
+}
+
+func unzip(src, dest string) error {
+	r, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		defer rc.Close()
+
+		fpath := filepath.Join(dest, f.Name)
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(fpath, f.Mode())
+		} else {
+			var fdir string
+			if lastIndex := strings.LastIndex(fpath, string(os.PathSeparator)); lastIndex > -1 {
+				fdir = fpath[:lastIndex]
+			}
+
+			err = os.MkdirAll(fdir, f.Mode())
+			if err != nil {
+				return err
+			}
+			f, err := os.OpenFile(
+				fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+
+			_, err = io.Copy(f, rc)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
