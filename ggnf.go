@@ -65,12 +65,24 @@ func main() {
 				wg.Add(1)
 				go func(font string) {
 					defer wg.Done()
+					f, ok := fonts[font]
+					if !ok {
+						log.Printf("Unable to find font %s, make sure you enter the correct font\n", font)
+						return
+					}
+					if f.InstalledVersion == f.LatestVersion {
+						log.Printf("Font %s already installed, skip...", font)
+						return
+					}
+
 					log.Printf("Downloading font %s... It may take a while\n", font)
 					if err := downloadFont(fonts[font]); err != nil {
 						log.Fatalf("Unable to download font %s due to: %s", font, err)
 					}
 
 					// Update installed version
+					f.InstalledVersion = f.LatestVersion
+					fonts[font] = f
 
 					log.Printf("Download font %s\n", font)
 					// Run fc-cache to update font list (Linux). Don't know how it works in Darwin, Windows
