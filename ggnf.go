@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"runtime"
@@ -86,6 +87,10 @@ func main() {
 
 					log.Printf("Download font %s\n", font)
 					// Run fc-cache to update font list (Linux). Don't know how it works in Darwin, Windows
+					cmd := exec.Command("fc-cache", "-f")
+					if err := cmd.Run(); err != nil {
+						log.Println("Error when running fc-cache:", err)
+					}
 				}(a)
 			}
 			wg.Wait()
