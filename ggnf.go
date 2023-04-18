@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/google/go-github/github"
+	"github.com/schollz/progressbar/v3"
 )
 
 var helpText = strings.TrimSpace(`
@@ -85,9 +86,9 @@ func main() {
 					f.InstalledVersion = f.LatestVersion
 					fonts[font] = f
 
-					log.Printf("Download font %s\n", font)
+					log.Printf("Installing font %s...\n", font)
 					// Run fc-cache to update font list (Linux). Don't know how it works in Darwin, Windows
-					cmd := exec.Command("fc-cache", "-f")
+					cmd := exec.Command("fc-cache", "-fv")
 					if err := cmd.Run(); err != nil {
 						log.Println("Error when running fc-cache:", err)
 					}
@@ -97,6 +98,8 @@ func main() {
 		case "-h", "--help":
 			fmt.Println(helpText)
 		}
+	} else {
+		fmt.Println(helpText)
 	}
 }
 
@@ -118,7 +121,7 @@ func getLatestRelease(ctx context.Context, fonts map[string]Font) error {
 	log.Println("Found new release:", latestRelease.GetName())
 	for _, a := range latestRelease.Assets {
 		f := Font{
-			Name:          strings.Trim(a.GetName(), ".zip"),
+			Name:          strings.TrimSuffix(a.GetName(), ".zip"),
 			LatestVersion: latestRelease.GetName(),
 			DownloadURL:   a.GetBrowserDownloadURL(),
 		}
@@ -187,8 +190,13 @@ func downloadFont(font Font) error {
 		os.Remove(archivePath)
 	}()
 
+	bar := progressbar.DefaultBytes(
+		resp.ContentLength,
+		"downloading",
+	)
+
 	// Writer the body to file
-	_, err = io.Copy(out, resp.Body)
+	_, err = io.Copy(io.MultiWriter(out, bar), resp.Body)
 	if err != nil {
 		return err
 	}
