@@ -61,6 +61,7 @@ func main() {
 	if len(args) > 0 {
 		switch args[0] {
 		case "list":
+			printJSON(fonts)
 		case "download":
 			var wg sync.WaitGroup
 			for _, a := range args[1:] {
@@ -77,7 +78,7 @@ func main() {
 						return
 					}
 
-					log.Printf("Downloading font %s... It may take a while\n", font)
+					log.Printf("Downloading font %s ... It may take a while\n", font)
 					if err := downloadFont(fonts[font]); err != nil {
 						log.Fatalf("Unable to download font %s due to: %s", font, err)
 					}
@@ -86,7 +87,7 @@ func main() {
 					f.InstalledVersion = f.LatestVersion
 					fonts[font] = f
 
-					log.Printf("Installing font %s...\n", font)
+					log.Printf("Installing font %s ...\n", font)
 				}(a)
 			}
 			wg.Wait()
@@ -100,6 +101,16 @@ func main() {
 		}
 	} else {
 		fmt.Println(helpText)
+	}
+}
+
+// printJSON prints v as JSON encoded with indent to stdout. It panics on any error.
+func printJSON(v interface{}) {
+	w := json.NewEncoder(os.Stdout)
+	w.SetIndent("", "\t")
+	err := w.Encode(v)
+	if err != nil {
+		panic(err)
 	}
 }
 
