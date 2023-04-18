@@ -44,6 +44,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Get font dir
+	fontDir := getFontDir()
+
 	// Load data
 	fonts, err := loadData(dataFile)
 	if err != nil {
@@ -79,7 +82,7 @@ func main() {
 					}
 
 					log.Printf("Downloading font %s ... It may take a while\n", font)
-					if err := downloadFont(fonts[font]); err != nil {
+					if err := downloadFont(fonts[font], fontDir); err != nil {
 						log.Fatalf("Unable to download font %s due to: %s", font, err)
 					}
 
@@ -91,10 +94,9 @@ func main() {
 				}(a)
 			}
 			wg.Wait()
-			// Run fc-cache to update font list (Linux). Don't know how it works in Darwin, Windows
-			cmd := exec.Command("fc-cache", "-f")
-			if err := cmd.Run(); err != nil {
-				log.Println("Error when running fc-cache:", err)
+
+			if err := scanFontDir(fontDir); err != nil {
+				log.Printf("Error when scanning the font directory %s and building font information cache files: %s\n", fontDir, err)
 			}
 		case "-h", "--help":
 			fmt.Println(helpText)
@@ -183,7 +185,7 @@ func getFontDir() string {
 
 // downloadFont gets the font from Github release and extract
 // to the right place
-func downloadFont(font Font) error {
+func downloadFont(font Font, fontDir string) error {
 	archivePath := filepath.Join(os.TempDir(), font.Name+".zip")
 	// Create the file
 	out, err := os.Create(archivePath)
@@ -214,7 +216,24 @@ func downloadFont(font Font) error {
 	}
 
 	// Unzip
-	return unzip(archivePath, filepath.Join(getFontDir(), font.Name))
+	return unzip(archivePath, filepath.Join(fontDir, font.Name))
+}
+
+// scanFontDir
+func scanFontDir(fontDir string) error {
+	switch runtime.GOOS {
+	case "windows":
+
+	case "darwin", "ios":
+
+	case "plan9":
+
+	default: // Unix
+		// Run fc-cache to update font list (Linux). Don't know how it works in Darwin, Windows
+		cmd := exec.Command("fc-cache", "-f", fontDir)
+		return cmd.Run()
+	}
+	return nil
 }
 
 // loadData gets the list of fonts
