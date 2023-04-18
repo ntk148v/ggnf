@@ -22,11 +22,12 @@ import (
 
 var helpText = strings.TrimSpace(`
 ggnf is Nerd Font downloader written in Golang.
-https://github.com/ntk148v/ggnf
+<https://github.com/ntk148v/ggnf>
 
 Usage:
-  ggnf list                        - List all fonts
-  ggnf download <font1> <font2>... - Download the given fonts
+  ggnf list                           - List all fonts
+  ggnf download <font1> <font2> ...   - Download the given fonts
+  ggnf remove <font1> <font2> ...     - Remove the given fonts
 `)
 
 type Font struct {
@@ -77,7 +78,7 @@ func main() {
 						return
 					}
 					if f.InstalledVersion == f.LatestVersion {
-						log.Printf("Font %s already installed, skip...", font)
+						log.Printf("Font %s already installed, skip ...", font)
 						return
 					}
 
@@ -91,6 +92,35 @@ func main() {
 					fonts[font] = f
 
 					log.Printf("Installing font %s ...\n", font)
+				}(a)
+			}
+			wg.Wait()
+
+			if err := scanFontDir(fontDir); err != nil {
+				log.Printf("Error when scanning the font directory %s and building font information cache files: %s\n", fontDir, err)
+				return
+			}
+		case "remove":
+			var wg sync.WaitGroup
+			for _, a := range args[1:] {
+				wg.Add(1)
+				go func(font string) {
+					defer wg.Done()
+					f, ok := fonts[font]
+					if !ok {
+						log.Printf("Unable to find font %s, make sure you enter the correct font\n", font)
+						return
+					}
+
+					// Remove fonts
+					log.Printf("Removing font %s ...\n", font)
+					if err := removeFont(f, fontDir); err != nil {
+						log.Printf("Error when removing font %s: %s \n", font, err)
+						return
+					}
+					// Update installed version
+					f.InstalledVersion = ""
+					fonts[font] = f
 				}(a)
 			}
 			wg.Wait()
@@ -181,6 +211,11 @@ func getFontDir() string {
 	dir = filepath.Join(dir, "NerdFonts")
 	os.MkdirAll(dir, os.ModePerm)
 	return dir
+}
+
+// removeFont deletes the font directory
+func removeFont(font Font, fontDir string) error {
+	return os.RemoveAll(filepath.Join(fontDir, font.Name))
 }
 
 // downloadFont gets the font from Github release and extract
