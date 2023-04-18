@@ -220,7 +220,7 @@ func getFontDir() string {
 
 	// Create font dir
 	dir = filepath.Join(dir, "NerdFonts")
-	os.MkdirAll(dir, os.ModePerm)
+	_ = os.MkdirAll(dir, os.ModePerm)
 	return dir
 }
 
@@ -291,7 +291,7 @@ func loadData(dataFile string) (map[string]Font, error) {
 	fonts := make(map[string]Font, 0)
 	if _, err := os.Stat(dataFile); err != nil {
 		if os.IsNotExist(err) {
-			os.Create(dataFile)
+			_, _ = os.Create(dataFile)
 			return fonts, nil
 		}
 		return fonts, err
@@ -328,7 +328,7 @@ func unzip(src, dest string) error {
 		}
 	}()
 
-	os.MkdirAll(dest, 0755)
+	_ = os.MkdirAll(dest, 0755)
 
 	// Closure to address file descriptors issue with all the deferred .Close() methods
 	extractAndWriteFile := func(f *zip.File) error {
@@ -350,9 +350,9 @@ func unzip(src, dest string) error {
 		}
 
 		if f.FileInfo().IsDir() {
-			os.MkdirAll(path, f.Mode())
+			_ = os.MkdirAll(path, f.Mode())
 		} else {
-			os.MkdirAll(filepath.Dir(path), f.Mode())
+			_ = os.MkdirAll(filepath.Dir(path), f.Mode())
 			f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 			if err != nil {
 				return err
