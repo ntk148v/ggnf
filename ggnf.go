@@ -165,6 +165,7 @@ func getFontDir() string {
 	}
 
 	// Create font dir
+	dir = filepath.Join(dir, "NerdFonts")
 	os.MkdirAll(dir, os.ModePerm)
 	return dir
 }
