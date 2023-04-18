@@ -87,14 +87,14 @@ func main() {
 					fonts[font] = f
 
 					log.Printf("Installing font %s...\n", font)
-					// Run fc-cache to update font list (Linux). Don't know how it works in Darwin, Windows
-					cmd := exec.Command("fc-cache", "-fv")
-					if err := cmd.Run(); err != nil {
-						log.Println("Error when running fc-cache:", err)
-					}
 				}(a)
 			}
 			wg.Wait()
+			// Run fc-cache to update font list (Linux). Don't know how it works in Darwin, Windows
+			cmd := exec.Command("fc-cache", "-f")
+			if err := cmd.Run(); err != nil {
+				log.Println("Error when running fc-cache:", err)
+			}
 		case "-h", "--help":
 			fmt.Println(helpText)
 		}
@@ -227,7 +227,7 @@ func loadData(dataFile string) (map[string]Font, error) {
 
 // saveData dumps the list of fonts to disk
 func saveData(dataFile string, fonts map[string]Font) error {
-	raw, err := json.Marshal(fonts)
+	raw, err := json.MarshalIndent(fonts, "", "	")
 	if err != nil {
 		return err
 	}
