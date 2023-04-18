@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,11 +15,13 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/fatih/color"
 	"github.com/google/go-github/github"
 	"github.com/schollz/progressbar/v3"
 )
 
-var helpText = strings.TrimSpace(`
+var (
+	helpText = strings.TrimSpace(`
 ggnf is Nerd Font downloader written in Golang.
 <https://github.com/ntk148v/ggnf>
 
@@ -29,6 +30,11 @@ Usage:
   ggnf download <font1> <font2> ...   - Download the given fonts
   ggnf remove <font1> <font2> ...     - Remove the given fonts
 `)
+	// colorize output
+	infoPrint  = color.New(color.FgGreen).PrintfFunc()
+	warnPrint  = color.New(color.FgYellow).PrintfFunc()
+	errorPrint = color.New(color.FgRed).PrintfFunc()
+)
 
 type Font struct {
 	Name             string `json:"name"`
@@ -51,21 +57,27 @@ func main() {
 	// Load data
 	fonts, err := loadData(dataFile)
 	if err != nil {
-		log.Fatalln("Unable to load data from file due to: ", err)
+		errorPrint("Unable to load data from file due to: %s\n", err)
+		os.Exit(1)
 	}
 
 	defer saveData(dataFile, fonts)
 
 	// Get Nerd Fonts latest release from Github
 	if err := getLatestRelease(ctx, fonts); err != nil {
-		log.Fatalln("Unable to get latest Nerd Fonts release due to: ", err)
+		errorPrint("Unable to get latest Nerd Fonts release due to: %s\n", err)
+		os.Exit(1)
 	}
 
 	args := os.Args[1:]
 	if len(args) > 0 {
 		switch args[0] {
 		case "list":
-			printJSON(fonts)
+			infoPrint("List all Nerd Fonts with version\n")
+			if err := printJSON(fonts); err != nil {
+				errorPrint("Unable to list fonts due to: %s\n", err)
+				os.Exit(1)
+			}
 		case "download":
 			var wg sync.WaitGroup
 			for _, a := range args[1:] {
@@ -74,30 +86,31 @@ func main() {
 					defer wg.Done()
 					f, ok := fonts[font]
 					if !ok {
-						log.Printf("Unable to find font %s, make sure you enter the correct font\n", font)
+						warnPrint("Unable to find font %s, make sure you enter the correct font\n", font)
 						return
 					}
 					if f.InstalledVersion == f.LatestVersion {
-						log.Printf("Font %s already installed, skip ...", font)
+						infoPrint("Font %s already installed, skip ...\n", font)
 						return
 					}
 
-					log.Printf("Downloading font %s ... It may take a while\n", font)
+					infoPrint("Downloading font %s ... It may take a while\n", font)
 					if err := downloadFont(fonts[font], fontDir); err != nil {
-						log.Fatalf("Unable to download font %s due to: %s", font, err)
+						errorPrint("Unable to download font %s due to: %s\n", font, err)
+						return
 					}
 
 					// Update installed version
 					f.InstalledVersion = f.LatestVersion
 					fonts[font] = f
 
-					log.Printf("Installing font %s ...\n", font)
+					infoPrint("Installing font %s ...\n", font)
 				}(a)
 			}
 			wg.Wait()
 
 			if err := scanFontDir(fontDir); err != nil {
-				log.Printf("Error when scanning the font directory %s and building font information cache files: %s\n", fontDir, err)
+				errorPrint("Error when scanning the font directory %s and building font information cache files: %s\n", fontDir, err)
 				return
 			}
 		case "remove":
@@ -108,14 +121,14 @@ func main() {
 					defer wg.Done()
 					f, ok := fonts[font]
 					if !ok {
-						log.Printf("Unable to find font %s, make sure you enter the correct font\n", font)
+						warnPrint("Unable to find font %s, make sure you enter the correct font\n", font)
 						return
 					}
 
 					// Remove fonts
-					log.Printf("Removing font %s ...\n", font)
+					infoPrint("Removing font %s ...\n", font)
 					if err := removeFont(f, fontDir); err != nil {
-						log.Printf("Error when removing font %s: %s \n", font, err)
+						errorPrint("Error when removing font %s: %s \n", font, err)
 						return
 					}
 					// Update installed version
@@ -126,24 +139,21 @@ func main() {
 			wg.Wait()
 
 			if err := scanFontDir(fontDir); err != nil {
-				log.Printf("Error when scanning the font directory %s and building font information cache files: %s\n", fontDir, err)
+				errorPrint("Error when scanning the font directory %s and building font information cache files: %s\n", fontDir, err)
 			}
-		case "-h", "--help":
-			fmt.Println(helpText)
+		case "-h", "--help", "help":
+			infoPrint(helpText)
 		}
 	} else {
-		fmt.Println(helpText)
+		infoPrint(helpText)
 	}
 }
 
 // printJSON prints v as JSON encoded with indent to stdout. It panics on any error.
-func printJSON(v interface{}) {
+func printJSON(v interface{}) error {
 	w := json.NewEncoder(os.Stdout)
 	w.SetIndent("", "\t")
-	err := w.Encode(v)
-	if err != nil {
-		panic(err)
-	}
+	return w.Encode(v)
 }
 
 // getLatestRelease fetches Github for the latest Nerd Fonts release
@@ -161,7 +171,7 @@ func getLatestRelease(ctx context.Context, fonts map[string]Font) error {
 		return nil
 	}
 
-	log.Println("Found new release:", latestRelease.GetName())
+	infoPrint("Found new release: %s\n", latestRelease.GetName())
 	for _, a := range latestRelease.Assets {
 		f := Font{
 			Name:          strings.TrimSuffix(a.GetName(), ".zip"),
@@ -182,7 +192,8 @@ func getLatestRelease(ctx context.Context, fonts map[string]Font) error {
 func isRoot() bool {
 	currentUser, err := user.Current()
 	if err != nil {
-		log.Fatalln("Unable to get current user:", err)
+		errorPrint("Unable to get current user: %s\n", err)
+		os.Exit(1)
 	}
 	return currentUser.Username == "root"
 }
@@ -239,6 +250,8 @@ func downloadFont(font Font, fontDir string) error {
 		os.Remove(archivePath)
 	}()
 
+	color.Set(color.FgCyan)
+
 	bar := progressbar.DefaultBytes(
 		resp.ContentLength,
 		"downloading",
@@ -249,6 +262,8 @@ func downloadFont(font Font, fontDir string) error {
 	if err != nil {
 		return err
 	}
+
+	defer color.Unset()
 
 	// Unzip
 	return unzip(archivePath, filepath.Join(fontDir, font.Name))
