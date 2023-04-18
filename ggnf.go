@@ -29,6 +29,7 @@ Usage:
   ggnf list                           - List all fonts
   ggnf download <font1> <font2> ...   - Download the given fonts
   ggnf remove <font1> <font2> ...     - Remove the given fonts
+
 `)
 	// colorize output
 	infoPrint  = color.New(color.FgGreen).PrintfFunc()
