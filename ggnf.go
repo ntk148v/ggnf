@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/google/go-github/github"
@@ -36,13 +37,6 @@ Usage:
 	warnPrint  = color.New(color.FgYellow).PrintfFunc()
 	errorPrint = color.New(color.FgRed).PrintfFunc()
 )
-
-type Font struct {
-	Name             string `json:"name"`
-	DownloadURL      string `json:"download_url"`
-	InstalledVersion string `json:"installed"`
-	LatestVersion    string `json:"latest"`
-}
 
 func main() {
 	configDir, _ := os.UserConfigDir()
@@ -80,7 +74,11 @@ func main() {
 				os.Exit(1)
 			}
 		case "download":
+			// Create MultiProgressBar
+			mpb := NewMultiProgressBar(make([]*progressbar.ProgressBar, 0), os.Stderr)
+
 			var wg sync.WaitGroup
+
 			for _, a := range args[1:] {
 				wg.Add(1)
 				go func(font string) {
@@ -95,7 +93,7 @@ func main() {
 						return
 					}
 
-					if err := downloadFont(fonts[font], fontDir); err != nil {
+					if err := downloadFont(mpb, fonts[font], fontDir); err != nil {
 						errorPrint("Unable to download font %s due to: %s\n", font, err)
 						return
 					}
@@ -103,8 +101,6 @@ func main() {
 					// Update installed version
 					f.InstalledVersion = f.LatestVersion
 					fonts[font] = f
-
-					infoPrint("Installing font %s ...\n", font)
 				}(a)
 			}
 			wg.Wait()
@@ -113,6 +109,8 @@ func main() {
 				errorPrint("Error when scanning the font directory %s and building font information cache files: %s\n", fontDir, err)
 				return
 			}
+
+			infoPrint("All done!")
 		case "remove":
 			var wg sync.WaitGroup
 			for _, a := range args[1:] {
@@ -149,6 +147,77 @@ func main() {
 	}
 }
 
+type Font struct {
+	Name             string `json:"name"`
+	DownloadURL      string `json:"download_url"`
+	InstalledVersion string `json:"installed"`
+	LatestVersion    string `json:"latest"`
+}
+
+type LineWriter struct {
+	*MultiProgressBar
+	id int
+}
+
+func (lw *LineWriter) Write(p []byte) (n int, err error) {
+	lw.guard.Lock()
+	defer lw.guard.Unlock()
+	lw.Move(lw.id, lw.output)
+	return lw.output.Write(p)
+}
+
+type MultiProgressBar struct {
+	output  io.Writer
+	curLine int
+	Bars    []*progressbar.ProgressBar
+	guard   sync.Mutex
+}
+
+func NewMultiProgressBar(pBars []*progressbar.ProgressBar, output io.Writer) *MultiProgressBar {
+	mpb := &MultiProgressBar{
+		curLine: 0,
+		Bars:    pBars,
+		guard:   sync.Mutex{},
+		output:  output,
+	}
+	for id, pb := range mpb.Bars {
+		progressbar.OptionSetWriter(&LineWriter{
+			MultiProgressBar: mpb,
+			id:               id,
+		})(pb)
+	}
+
+	return mpb
+}
+
+func (mpb *MultiProgressBar) Add(b *progressbar.ProgressBar) {
+	mpb.Bars = append(mpb.Bars, b)
+	id := len(mpb.Bars) - 1
+	progressbar.OptionSetWriter(&LineWriter{
+		MultiProgressBar: mpb,
+		id:               id,
+	})(b)
+}
+
+// Move cursor to the beginning of the current progressbar.
+func (mpb *MultiProgressBar) Move(id int, writer io.Writer) (int, error) {
+	bias := mpb.curLine - id
+	mpb.curLine = id
+	if bias > 0 {
+		// move up
+		return fmt.Fprintf(writer, "\r\033[%dA", bias)
+	} else if bias < 0 {
+		// move down
+		return fmt.Fprintf(writer, "\r\033[%dB", -bias)
+	}
+	return 0, nil
+}
+
+// End Move cursor to the end of the Progressbars.
+func (mpb *MultiProgressBar) End() {
+	mpb.Move(len(mpb.Bars), mpb.output)
+}
+
 // printJSON prints v as JSON encoded with indent to stdout. It panics on any error.
 func printJSON(v interface{}) error {
 	w := json.NewEncoder(os.Stdout)
@@ -172,6 +241,7 @@ func getLatestRelease(ctx context.Context, fonts map[string]Font) error {
 	}
 
 	infoPrint("Found new release: %s\n", latestRelease.GetName())
+	infoPrint("Initializing GGNF for the first time ...")
 	for _, a := range latestRelease.Assets {
 		f := Font{
 			Name:          strings.TrimSuffix(a.GetName(), ".zip"),
@@ -231,7 +301,7 @@ func removeFont(font Font, fontDir string) error {
 
 // downloadFont gets the font from Github release and extract
 // to the right place
-func downloadFont(font Font, fontDir string) error {
+func downloadFont(mpb *MultiProgressBar, font Font, fontDir string) error {
 	archivePath := filepath.Join(os.TempDir(), font.Name+".zip")
 	// Create the file
 	out, err := os.Create(archivePath)
@@ -250,16 +320,25 @@ func downloadFont(font Font, fontDir string) error {
 		os.Remove(archivePath)
 	}()
 
-	color.Set(color.FgCyan)
-
-	bar := progressbar.DefaultBytes(
+	bar := progressbar.NewOptions64(
 		resp.ContentLength,
-		fmt.Sprintf("Downloading %s ...", font.Name),
+		progressbar.OptionSetDescription(fmt.Sprintf("Downloading %-20s", font.Name)),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionSetWidth(10),
+		progressbar.OptionThrottle(50*time.Millisecond),
+		progressbar.OptionShowCount(),
+		progressbar.OptionOnCompletion(func() {
+			fmt.Fprintf(os.Stderr, "\nDownloaded %-20s\n", font.Name)
+		}),
+		progressbar.OptionFullWidth(),
+		progressbar.OptionSetRenderBlankState(false),
 	)
+
+	// Add to MultiProgressBar
+	mpb.Add(bar)
 
 	// Writer the body to file
 	_, err = io.Copy(io.MultiWriter(out, bar), resp.Body)
-	defer color.Unset()
 	if err != nil {
 		return err
 	}
@@ -270,6 +349,7 @@ func downloadFont(font Font, fontDir string) error {
 
 // scanFontDir
 func scanFontDir(fontDir string) error {
+	infoPrint("Scan font dir to build cache")
 	switch runtime.GOOS {
 	case "windows":
 
