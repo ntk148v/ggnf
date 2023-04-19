@@ -95,7 +95,6 @@ func main() {
 						return
 					}
 
-					infoPrint("Downloading font %s ... It may take a while\n", font)
 					if err := downloadFont(fonts[font], fontDir); err != nil {
 						errorPrint("Unable to download font %s due to: %s\n", font, err)
 						return
@@ -255,16 +254,15 @@ func downloadFont(font Font, fontDir string) error {
 
 	bar := progressbar.DefaultBytes(
 		resp.ContentLength,
-		"downloading",
+		fmt.Sprintf("Downloading %s ...", font.Name),
 	)
 
 	// Writer the body to file
 	_, err = io.Copy(io.MultiWriter(out, bar), resp.Body)
+	defer color.Unset()
 	if err != nil {
 		return err
 	}
-
-	defer color.Unset()
 
 	// Unzip
 	return unzip(archivePath, filepath.Join(fontDir, font.Name))
