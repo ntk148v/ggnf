@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	helpText = strings.TrimSpace(`
+	helpText = `
 ggnf is Nerd Font downloader written in Golang.
 <https://github.com/ntk148v/ggnf>
 
@@ -30,7 +30,7 @@ Usage:
   ggnf download <font1> <font2> ...   - Download the given fonts
   ggnf remove <font1> <font2> ...     - Remove the given fonts
 
-`)
+`
 	// colorize output
 	infoPrint  = color.New(color.FgGreen).PrintfFunc()
 	warnPrint  = color.New(color.FgYellow).PrintfFunc()
