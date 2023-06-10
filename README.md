@@ -28,7 +28,7 @@ Table of content
 
 ## 2. Installation
 
-- Download the latest binary from the [Release page]. It's the easiest way to get started with `ggnf`.
+- Download the latest binary from the [Release page](https://github.com/ntk148v/ggnf/releases). It's the easiest way to get started with `ggnf`.
 - Give it execute permission.
 
 ```shell
