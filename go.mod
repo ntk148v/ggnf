@@ -5,7 +5,7 @@ go 1.19
 require (
 	github.com/fatih/color v1.16.0
 	github.com/google/go-github v17.0.0+incompatible
-	github.com/schollz/progressbar/v3 v3.14.5
+	github.com/schollz/progressbar/v3 v3.14.6
 )
 
 require (
