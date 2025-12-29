@@ -1,11 +1,11 @@
 module github.com/ntk148v/ggnf
 
-go 1.19
+go 1.22
 
 require (
 	github.com/fatih/color v1.18.0
 	github.com/google/go-github v17.0.0+incompatible
-	github.com/schollz/progressbar/v3 v3.18.0
+	github.com/schollz/progressbar/v3 v3.19.0
 )
 
 require (
